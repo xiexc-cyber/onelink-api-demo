@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>物联卡管理</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.3/css/bulma.min.css"
+    integrity="sha512-IgmDkwzs96t4SrChW29No3NXBIBv8baW490zk5aXvhCD8vuZM3yUSkbyTBcXohkySecyzIrUwiF/qV0cuPcL3Q=="
+    crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+
+<body>
+  <div id="app">
+
+    <section class="section">
+      <div class="container">
+        <div class="field has-addons" id="iot-sim-search">
+          <div class="control is-expanded">
+            <input class="input is-rounded" type="text" placeholder="请输入物联卡号码" v-model="searchKeyMsisdn">
+          </div>
+          <div class="control">
+            <button class="button is-info is-rounded" @click="search">查询</button>
+          </div>
+        </div>
+
+        <div class="field" id="iot-sim-white-member-config">
+          <div class="control is-expanded">
+            <h3 class="title is-3">SIM卡状态信息</h3>
+            <div class="notification is-info is-light">
+              近期将上线此项功能
+            </div>
+          </div>
+        </div>
+
+        <div class="field" id="iot-sim-white-member-config">
+          <div class="control is-expanded">
+            <h3 class="title is-3">白名单配置</h3>
+            <div class="notification is-warning" v-if="whiteNumberList.length == 0">
+              暂无数据（请刷新再次查看，或者尝试添加号码）
+            </div>
+            <ul v-else>
+              <li v-for="whiteNumber in whiteNumberList">
+                <label class="checkbox">
+                  <input type="checkbox" :value="whiteNumber.msisdn" @click="checkWhiteNumber">
+                  {{ whiteNumber.msisdn }}
+                </label>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="field has-addons">
+          <div class="control is-expanded">
+            <input class="input is-rounded" type="text" placeholder="请输入手机号码" v-model="newWhiteNumberMsisdn">
+          </div>
+          <div class="control">
+            <button class="button is-info is-rounded" @click="updateWhiteNumber('add')" :disabled="lockMode">添加白名单<span
+                v-if="lockMode"> 【{{ lockCounterNum }}s 后可再次操作】</span></button>
+          </div>
+        </div>
+
+        <div class="field has-addons">
+          <div class="control">
+            <button class="button is-danger is-light is-rounded" @click="updateWhiteNumber('delete')" :disabled="lockMode">删除选中白名单<span
+                v-if="lockMode">【{{ lockCounterNum }}s 后可再次操作】</span></button>
+          </div>
+        </div>
+
+        <article class="message">
+          <div class="message-body">
+            白名单操作规则：1分钟内新增或者删除动作只能触发1次；单次操作仅能新增1个号码；单次操作可选择至多2个号码删除，每月仅能删除1次，
+          </div>
+        </article>
+
+        <div class="modal" :class="confirmModalStatus">
+          <div class="modal-background"></div>
+          <div class="modal-card">
+            <header class="modal-card-head">
+              <p class="modal-card-title">操作确认</p>
+              <button class="delete" aria-label="close" @click="cancel"></button>
+            </header>
+            <section class="modal-card-body">
+              您本次操作 <em>{{ operationTypeText }}</em> 白名单号码：{{ operationwhiteNumberText }}，请核实无误后点击保存。
+            </section>
+            <footer class="modal-card-foot">
+              <button class="button is-success" @click="save">保存</button>
+              <button class="button" @click="cancel">取消</button>
+            </footer>
+          </div>
+        </div>
+
+      </div>
+    </section>
+  </div>
+  <script src="https://unpkg.com/vue@next"></script>
+  <script>
+    const baseURL = "https://cn-cd-dx-1.natfrp.cloud:55422/iot_api_reverse_proxy"
+    const lockDuration = 60
+    const app = {
+      data() {
+        return {
+          apiToken: "",
+          searchKeyMsisdn: "",
+          whiteNumberList: [],
+          newWhiteNumberMsisdn: "",
+          oldWhiteNumberMsisdn: new Set(),
+          confirmModalStatus: "",
+          operationTypeText: "",
+          operationwhiteNumberText: "",
+          saveMode: "",
+          lockMode: false,
+          lockCounterNum: lockDuration,
+          lockCounterID: null,
+        }
+      },
+      methods: {
+        async search() {
+          // check whether token is valid
+          await this.fetchToken()
+          await this.fetchWhiteNumberList()
+        },
+        async fetchToken() {
+          const that = this
+          await fetch(
+            "https://fa13da0bb6c84ad6b5334a08c18f34bc.apig.cn-east-3.huaweicloudapis.com/api/token"
+          ).then(async (resp) => {
+            const jresp = await resp.json()
+            that.apiToken = jresp.result[0].token
+          })
+        },
+        async fetchWhiteNumberList() {
+          const that = this
+          const randNumbStr = this.getRandNumStr()
+
+          fetch(
+              `${baseURL}/v5/ec/query/person-voice-white-number?transid=791340054791791000202109010000${randNumbStr}&token=${that.apiToken}&msisdn=${that.searchKeyMsisdn}`
+            )
+            .then(async (resp) => {
+              const jresp = await resp.json()
+              if (jresp.status == "0") {
+                that.whiteNumberList = jresp.result[0].whiteNumberList
+              } else if (jresp.status == "12021") {
+                alert("获取信息失败，请重试")
+              }
+            })
+        },
+        async toggleCofirmModal() {
+          if (this.confirmModalStatus == "is-active") {
+            this.confirmModalStatus = ""
+          } else {
+            this.confirmModalStatus = "is-active"
+          }
+        },
+        async updateWhiteNumber(mode) {
+          this.toggleCofirmModal()
+
+          this.saveMode = mode
+
+          if (mode == "add") {
+            this.operationTypeText = "新增"
+            this.operationwhiteNumberText = this.newwhiteNumberMsisdn
+          } else if (mode == "delete") {
+            this.operationTypeText = "删除"
+            this.operationwhiteNumberText = this.oldWhiteNumberMsisdn.values().join(", ")
+          }
+        },
+        async cancel() {
+          this.toggleCofirmModal()
+        },
+        async save() {
+          const that = this
+          this.toggleCofirmModal()
+          that.lockOnOperation()
+
+          const randNumbStr = this.getRandNumStr()
+
+          if (this.saveMode == "add") {
+            fetch(
+                `${baseURL}/v5/ec/config/member-voice-whitelist?transid=791340054791791000202109010000${randNumbStr}&token=${that.apiToken}&msisdn=${that.searchKeyMsisdn}&groupId=1811000014815034&operType=1&whiteNumber=${that.newWhiteNumberMsisdn}`
+              )
+              .then(async (resp) => {
+                const jresp = await resp.json()
+                if (jresp.status == "0") {
+                  that.lockOnOperation()
+                  alert("添加成功（新数据更新有延迟，请稍后再次查询）")
+                } else {
+                  alert(jresp.message)
+                }
+              })
+          } else if (this.saveMode == "delete") {
+            const oldWhiteNumberMsisdnStr = this.oldWhiteNumberMsisdn.values().join("_")
+            fetch(
+                `${baseURL}/v5/ec/config/member-voice-whitelist?transid=791340054791791000202109010000${randNumbStr}&token=${that.apiToken}&msisdn=${that.searchKeyMsisdn}&groupId=1811000014815034&operType=4&whiteNumber=${that.oldWhiteNumberMsisdnStr}`
+              )
+              .then(async (resp) => {
+                const jresp = await resp.json()
+                if (jresp.status == "0") {
+                  that.lockOnOperation()
+                  alert("删除成功（新数据更新有延迟，请稍后再次查询）")
+                } else {
+                  alert(jresp.message)
+                }
+              })
+          }
+        },
+        async checkWhiteNumber(e) {
+          const checked = e.target.checked
+          const val = e.target.value
+          const size = this.oldWhiteNumberMsisdn.size
+          if (size >= 2 && checked) {
+            e.preventDefault()
+            alert("单次最多可选择2个白名单号码删除!")
+          } else if (size < 2 && checked) {
+            this.oldWhiteNumberMsisdn.add(val)
+          } else if (!checked && size > 0) {
+            this.oldWhiteNumberMsisdn.delete(val)
+          }
+        },
+        intervalFunc() {
+          const that = this
+          console.log(that.lockCounterNum)
+          if (that.lockCounterNum > 0) {
+            that.lockCounterNum -= 1
+          } else {
+            that.lockMode = false
+            clearInterval(that.lockCounterID)
+          }
+        },
+        async lockOnOperation() {
+          const that = this
+          this.lockMode = true
+          this.lockCounterNum = lockDuration
+          this.lockCounterID = setInterval(that.intervalFunc, 1000)
+        },
+        async getRandNumStr() {
+          return String(Date.now()).substr(5,)
+        }
+      },
+    }
+    Vue.createApp(app).mount("#app")
+  </script>
+</body>
+
+</html>
